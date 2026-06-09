@@ -32,13 +32,19 @@ export class PanelProvider implements vscode.WebviewViewProvider {
           await this.pushState();
           break;
         case "save":
-          await vscode.workspace
-            .getConfiguration("shire")
-            .update(msg.key, msg.value, vscode.ConfigurationTarget.Global);
+          await this.saveSetting(msg.key, msg.value);
+          this.ack();
+          break;
+        case "saveAll":
+          for (const [k, v] of Object.entries(msg.values ?? {})) {
+            await this.saveSetting(k, v);
+          }
+          this.ack();
           break;
         case "saveSecret":
-          await this.deps.context.secrets.store(SECRET_KEY, msg.value ?? "");
+          await this.deps.context.secrets.store(SECRET_KEY, (msg.value ?? "").trim());
           setCachedApiKey(msg.value ?? "");
+          this.ack();
           vscode.window.showInformationMessage("Shire: API key saved (encrypted).");
           break;
         case "rebuild":
@@ -82,6 +88,16 @@ export class PanelProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: "status", status: s });
   }
 
+  private saveSetting(key: string, value: unknown): Thenable<void> {
+    return vscode.workspace
+      .getConfiguration("shire")
+      .update(key, value, vscode.ConfigurationTarget.Global);
+  }
+
+  private ack() {
+    this.view?.webview.postMessage({ type: "saved" });
+  }
+
   private html(webview: vscode.Webview): string {
     const nonce = crypto.randomBytes(16).toString("base64");
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
@@ -113,6 +129,7 @@ export class PanelProvider implements vscode.WebviewViewProvider {
 </style>
 </head>
 <body>
+  <div id="saved" style="position:sticky; top:0; z-index:2; display:none; margin:-10px -12px 8px; padding:6px 12px; background:#1f7a3f; color:#fff; font-size:12px;">✓ Saved</div>
   <h3>Connection</h3>
   <label>Base URL <span class="hint">(ends in /v1)</span></label>
   <input id="baseUrl" type="text" placeholder="https://host/v1" />
@@ -139,6 +156,8 @@ export class PanelProvider implements vscode.WebviewViewProvider {
   <label>Max index files <span class="hint">(lexical / semantic off)</span></label><input id="maxIndexFiles" type="number" />
   <label>Max semantic files <span class="hint">(semantic on)</span></label><input id="maxSemanticFiles" type="number" />
   <label>Embed concurrency</label><input id="embedConcurrency" type="number" />
+
+  <button id="saveAll">Save Settings</button>
 
   <h3>Index status</h3>
   <div id="progwrap" style="display:none; margin-bottom:8px;">
@@ -179,6 +198,13 @@ export class PanelProvider implements vscode.WebviewViewProvider {
     });
     $("rebuild").addEventListener("click", () => vscode.postMessage({ type: "rebuild" }));
     $("test").addEventListener("click", () => vscode.postMessage({ type: "test" }));
+    $("saveAll").addEventListener("click", () => {
+      const values = {};
+      TEXT.forEach(k => values[k] = $(k).value);
+      NUM.forEach(k => { const n = Number($(k).value); if (Number.isFinite(n)) values[k] = n; });
+      BOOL.forEach(k => values[k] = $(k).checked);
+      vscode.postMessage({ type: "saveAll", values });
+    });
   }
   function save(key, value) { vscode.postMessage({ type: "save", key, value }); }
 
@@ -208,10 +234,20 @@ export class PanelProvider implements vscode.WebviewViewProvider {
     $("st_err").textContent = s.lastError || "none";
   }
 
+  let savedTimer;
+  function flashSaved() {
+    const el = $("saved");
+    el.textContent = "✓ Saved " + new Date().toLocaleTimeString();
+    el.style.display = "block";
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => { el.style.display = "none"; }, 1800);
+  }
+
   window.addEventListener("message", (e) => {
     const m = e.data;
     if (m.type === "state") { applyConfig(m.config); applyStatus(m.status); }
     else if (m.type === "status") { applyStatus(m.status); }
+    else if (m.type === "saved") { flashSaved(); }
   });
 
   bind();
