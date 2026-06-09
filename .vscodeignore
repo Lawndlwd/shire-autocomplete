@@ -10,4 +10,5 @@ tsconfig.json
 **/*.ts
 .gitignore
 media/icon.svg
+media/logo-source.png
 media/panel-icon.svg.bak
