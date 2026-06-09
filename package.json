@@ -1,0 +1,200 @@
+{
+  "name": "shire-autocompletion",
+  "displayName": "Shire Autocompletion",
+  "description": "Fast inline FIM code autocomplete powered by your own OpenAI-compatible endpoint (Qwen2.5-Coder, Codestral, DeepSeek-Coder...). Recent-edit refactor assist + cross-file repo context.",
+  "version": "0.1.0",
+  "publisher": "your-publisher-id",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "autocomplete",
+    "copilot",
+    "ai",
+    "completion",
+    "qwen",
+    "codestral",
+    "ollama",
+    "local-llm",
+    "fim"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/REPLACE_WITH_YOUR_GH/shire-autocompletion.git"
+  },
+  "bugs": {
+    "url": "https://github.com/REPLACE_WITH_YOUR_GH/shire-autocompletion/issues"
+  },
+  "homepage": "https://github.com/REPLACE_WITH_YOUR_GH/shire-autocompletion#readme",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "shire.toggle",
+        "title": "Shire Autocompletion: Toggle Enabled"
+      },
+      {
+        "command": "shire.showOutput",
+        "title": "Shire Autocompletion: Show Debug Output"
+      },
+      {
+        "command": "shire.rebuildIndex",
+        "title": "Shire Autocompletion: Rebuild Repo Index"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "shire",
+          "title": "Shire Autocompletion",
+          "icon": "media/panel-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "shire": [
+        {
+          "type": "webview",
+          "id": "shire.panel",
+          "name": "Autocomplete"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Shire Autocompletion",
+      "properties": {
+        "shire.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline autocomplete."
+        },
+        "shire.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:8000/v1",
+          "description": "OpenAI-compatible base URL (must end at /v1). The extension calls {baseUrl}/completions. Point this at your own server (vLLM, llama.cpp, Ollama, TGI, or any hosted endpoint)."
+        },
+        "shire.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key sent as Authorization: Bearer. Leave empty for local servers that need none."
+        },
+        "shire.model": {
+          "type": "string",
+          "default": "Qwen2.5-Coder-7B",
+          "description": "Completion model name as registered on your endpoint. Use a FIM-capable code model (Qwen2.5-Coder, Codestral, DeepSeek-Coder, StarCoder2)."
+        },
+        "shire.debounceMs": {
+          "type": "number",
+          "default": 150,
+          "description": "Idle time after the last keystroke before a request fires."
+        },
+        "shire.maxPrefixChars": {
+          "type": "number",
+          "default": 3000,
+          "description": "Max characters of code before the cursor sent as FIM prefix."
+        },
+        "shire.maxSuffixChars": {
+          "type": "number",
+          "default": 1500,
+          "description": "Max characters of code after the cursor sent as FIM suffix."
+        },
+        "shire.maxTokens": {
+          "type": "number",
+          "default": 256,
+          "description": "Max tokens generated per completion."
+        },
+        "shire.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "description": "Sampling temperature. Low = more deterministic completions."
+        },
+        "shire.multiline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow multi-line completions. Turn off for single-line-only."
+        },
+        "shire.enableRecentEdits": {
+          "type": "boolean",
+          "default": true,
+          "description": "Feed your recent before/after edits into the prompt so the model propagates similar changes across files (refactor assist)."
+        },
+        "shire.enableRepoContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Index the workspace and inject the most relevant cross-file snippets into completions. Lexical (BM25) retrieval, no extra latency on the hot path."
+        },
+        "shire.enableSemanticRetrieval": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also use embeddings (your embedModel) for similarity retrieval. Higher relevance but adds a query-embedding network round-trip. Off by default for latency."
+        },
+        "shire.embedModel": {
+          "type": "string",
+          "default": "nomic-embed-text",
+          "description": "Embedding model name on your endpoint, used for the repo index when semantic retrieval is on."
+        },
+        "shire.maxNeighborFiles": {
+          "type": "number",
+          "default": 4,
+          "description": "Max cross-file snippets injected per completion."
+        },
+        "shire.retrievalTimeoutMs": {
+          "type": "number",
+          "default": 150,
+          "description": "Hard cap on retrieval time. If retrieval is slower, the completion proceeds without cross-file context rather than waiting."
+        },
+        "shire.embedConcurrency": {
+          "type": "number",
+          "default": 5,
+          "description": "How many files to embed in parallel when building the semantic index. Higher = faster build but more load on your embedding endpoint."
+        },
+        "shire.maxIndexFiles": {
+          "type": "number",
+          "default": 30000,
+          "description": "Max files to index in LEXICAL mode (semantic off). Handles large monorepos. If the repo has more, the set is sorted by path and capped deterministically."
+        },
+        "shire.maxSemanticFiles": {
+          "type": "number",
+          "default": 3000,
+          "description": "Max files to index when SEMANTIC retrieval is on (every file is embedded, so this is kept lower than maxIndexFiles). Sorted-by-path deterministic cap."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "icon": "node scripts/gen-icon.js",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "node esbuild.js --production",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.21.0",
+    "sharp": "^0.33.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "@orama/plugin-data-persistence": "^3.1.18",
+    "ignore": "^7.0.5"
+  }
+}
