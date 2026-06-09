@@ -3,7 +3,7 @@
   "displayName": "Shire Autocompletion",
   "description": "Fast inline FIM code autocomplete powered by your own OpenAI-compatible endpoint (Qwen2.5-Coder, Codestral, DeepSeek-Coder...). Recent-edit refactor assist + cross-file repo context.",
   "version": "0.1.0",
-  "publisher": "your-publisher-id",
+  "publisher": "lawndlwd",
   "license": "MIT",
   "icon": "media/icon.png",
   "engines": {
@@ -31,12 +31,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/REPLACE_WITH_YOUR_GH/shire-autocompletion.git"
+    "url": "https://github.com/Lawndlwd/shire-autocompletion.git"
   },
   "bugs": {
-    "url": "https://github.com/REPLACE_WITH_YOUR_GH/shire-autocompletion/issues"
+    "url": "https://github.com/Lawndlwd/shire-autocompletion/issues"
   },
-  "homepage": "https://github.com/REPLACE_WITH_YOUR_GH/shire-autocompletion#readme",
+  "homepage": "https://github.com/Lawndlwd/shire-autocompletion#readme",
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -54,6 +54,10 @@
       {
         "command": "shire.rebuildIndex",
         "title": "Shire Autocompletion: Rebuild Repo Index"
+      },
+      {
+        "command": "shire.testConnection",
+        "title": "Shire Autocompletion: Test Connection"
       }
     ],
     "viewsContainers": {

@@ -7,6 +7,7 @@ interface PanelDeps {
   context: vscode.ExtensionContext;
   status: Status;
   onRebuild: () => void;
+  onTest: () => void;
 }
 
 // Sidebar UI: edit connection + behaviour settings and watch live index/latency
@@ -42,6 +43,9 @@ export class PanelProvider implements vscode.WebviewViewProvider {
           break;
         case "rebuild":
           this.deps.onRebuild();
+          break;
+        case "test":
+          this.deps.onTest();
           break;
       }
     });
@@ -115,6 +119,7 @@ export class PanelProvider implements vscode.WebviewViewProvider {
   <label>API Key <span id="keyState" class="hint"></span></label>
   <input id="apiKey" type="password" placeholder="paste to update (stored encrypted)" />
   <button id="saveKey" class="secondary">Save API Key</button>
+  <button id="test">Test Connection</button>
   <label>Model</label>
   <input id="model" type="text" />
   <label>Embedding Model</label>
@@ -173,6 +178,7 @@ export class PanelProvider implements vscode.WebviewViewProvider {
       $("apiKey").value = "";
     });
     $("rebuild").addEventListener("click", () => vscode.postMessage({ type: "rebuild" }));
+    $("test").addEventListener("click", () => vscode.postMessage({ type: "test" }));
   }
   function save(key, value) { vscode.postMessage({ type: "save", key, value }); }
 

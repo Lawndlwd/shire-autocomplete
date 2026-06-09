@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { QwenInlineProvider } from "./provider";
+import { testConnection } from "./client";
 import { getConfig, SECRET_KEY, setCachedApiKey } from "./config";
 import { Indexer } from "./index/indexer";
 import { Status } from "./status";
@@ -35,11 +36,25 @@ export async function activate(context: vscode.ExtensionContext) {
     provider
   );
 
+  const runTest = async () => {
+    log.appendLine("testing connection…");
+    const r = await testConnection(getConfig(), (m) => log.appendLine(m));
+    status.update({ lastError: r.ok ? (r.fim ? "" : r.message) : r.message });
+    if (r.ok && r.fim) {
+      vscode.window.showInformationMessage(`Shire: ${r.message}`);
+    } else {
+      vscode.window.showWarningMessage(`Shire: ${r.message}`, "Show Output").then((c) => {
+        if (c) log.show();
+      });
+    }
+  };
+
   // Sidebar UI.
   const panel = new PanelProvider({
     context,
     status,
     onRebuild: () => indexer.rebuild().catch((e) => log.appendLine(`rebuild failed: ${e?.message ?? e}`)),
+    onTest: () => runTest(),
   });
   const panelReg = vscode.window.registerWebviewViewProvider(PanelProvider.viewId, panel);
 
@@ -51,6 +66,8 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   const showOutput = vscode.commands.registerCommand("shire.showOutput", () => log.show());
+
+  const testCmd = vscode.commands.registerCommand("shire.testConnection", () => runTest());
 
   const rebuild = vscode.commands.registerCommand("shire.rebuildIndex", () => {
     vscode.window.showInformationMessage("Shire: rebuilding repo index…");
@@ -75,7 +92,7 @@ export async function activate(context: vscode.ExtensionContext) {
     log.appendLine("WARNING: shire.baseUrl is empty — set it in the panel.");
   }
 
-  context.subscriptions.push(registration, panelReg, toggle, showOutput, rebuild, onCfgChange, log, {
+  context.subscriptions.push(registration, panelReg, toggle, showOutput, testCmd, rebuild, onCfgChange, log, {
     dispose: () => {
       provider.dispose();
       indexer.dispose();

@@ -111,10 +111,18 @@ export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
     this.inFlight = ctl;
     token.onCancellationRequested(() => ctl.abort());
 
-    const result = await complete(cfg, prompt, ctl.signal, (m) => this.log.appendLine(m));
+    const result = await complete(
+      cfg,
+      prompt,
+      ctl.signal,
+      (m) => this.log.appendLine(m),
+      (err) => this.status?.update({ lastError: err })
+    );
     if (!result || token.isCancellationRequested) {
       return; // don't cache results for a context the user already moved past
     }
+    // A successful completion clears any prior error shown in the panel.
+    this.status?.update({ lastError: "" });
 
     const text = this.postProcess(result.text, suffix, cfg.multiline);
     this.cache.set(key, text);

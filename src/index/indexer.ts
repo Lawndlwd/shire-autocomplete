@@ -129,7 +129,18 @@ export class Indexer {
     this.log.appendLine("building index…");
     try {
       let dim: number | undefined;
-      if (this.semantic) {
+      if (this.semantic && !cfg.embedModel) {
+        // Semantic requested but no embedding model configured — don't fail,
+        // just run lexical (which needs no embeddings at all).
+        this.semantic = false;
+        this.dim = undefined;
+        this.log.appendLine(
+          "semantic on but no embedModel set — using lexical only (set an embedding model to enable semantic)."
+        );
+        this.status.update({
+          lastError: "Semantic is on but no embedding model is set — using lexical.",
+        });
+      } else if (this.semantic) {
         const probe = await embed(cfg, ["dimension probe"]);
         if (probe && probe[0]) {
           dim = probe[0].length;
@@ -138,7 +149,12 @@ export class Indexer {
         } else {
           this.semantic = false;
           this.dim = undefined;
-          this.log.appendLine("embedding probe failed — falling back to lexical only.");
+          this.log.appendLine(
+            "embedding probe failed (endpoint/model unreachable) — falling back to lexical only."
+          );
+          this.status.update({
+            lastError: "Embedding model unreachable — using lexical instead.",
+          });
         }
       } else {
         this.dim = undefined;
