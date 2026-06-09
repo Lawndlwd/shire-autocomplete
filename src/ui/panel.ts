@@ -8,6 +8,7 @@ interface PanelDeps {
   status: Status;
   onRebuild: () => void;
   onTest: () => void;
+  onOpenSettings: () => void;
 }
 
 // Sidebar UI: edit connection + behaviour settings and watch live index/latency
@@ -52,6 +53,9 @@ export class PanelProvider implements vscode.WebviewViewProvider {
           break;
         case "test":
           this.deps.onTest();
+          break;
+        case "openSettings":
+          this.deps.onOpenSettings();
           break;
       }
     });
@@ -140,37 +144,20 @@ export class PanelProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div id="saved" style="position:sticky; top:0; z-index:2; display:none; margin:-10px -12px 8px; padding:6px 12px; background:#1f7a3f; color:#fff; font-size:12px;">✓ Saved</div>
-  <h3>Connection</h3>
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 style="margin-top:6px;">Connection</h3>
+    <button id="openSettings" class="secondary" title="Open all settings" style="width:auto; margin:0; padding:2px 9px; font-size:14px; line-height:1;">⚙</button>
+  </div>
   <label>Base URL <span class="hint">(ends in /v1)</span></label>
   <input id="baseUrl" type="text" placeholder="https://host/v1" />
   <label>API Key <span id="keyState" class="hint"></span></label>
   <input id="apiKey" type="password" placeholder="paste to update (stored encrypted)" />
   <button id="saveKey" class="secondary">Save API Key</button>
-  <button id="test">Test Connection</button>
   <label>Model</label>
   <input id="model" type="text" />
-  <label>Embedding Model</label>
+  <label>Embedding Model <span class="hint">(only for semantic)</span></label>
   <input id="embedModel" type="text" />
-
-  <h3>Completion API</h3>
-  <label>API Mode</label>
-  <select id="apiMode">
-    <option value="completions">completions (FIM)</option>
-    <option value="chat">chat</option>
-    <option value="auto">auto (try completions → chat)</option>
-  </select>
-  <label>FIM Template <span class="hint">(must match model family)</span></label>
-  <select id="fimTemplate">
-    <option value="qwen">qwen</option>
-    <option value="starcoder">starcoder</option>
-    <option value="deepseek">deepseek</option>
-    <option value="codestral">codestral</option>
-    <option value="custom">custom</option>
-  </select>
-  <label>Custom FIM template <span class="hint">{prefix}{suffix}</span></label><input id="customFimTemplate" type="text" />
-  <label>Custom stop <span class="hint">(comma-separated)</span></label><input id="customStop" type="text" />
-  <label>Temperature</label><input id="temperature" type="number" step="0.05" />
-  <label>Request timeout (ms)</label><input id="requestTimeoutMs" type="number" />
+  <button id="test">Test Connection</button>
 
   <h3>Behaviour</h3>
   <div class="row"><input id="enabled" type="checkbox" /><label for="enabled" style="margin:0">Autocomplete enabled</label></div>
@@ -178,19 +165,9 @@ export class PanelProvider implements vscode.WebviewViewProvider {
   <div class="row"><input id="enableRecentEdits" type="checkbox" /><label for="enableRecentEdits" style="margin:0">Recent-edit refactor assist</label></div>
   <div class="row"><input id="enableRepoContext" type="checkbox" /><label for="enableRepoContext" style="margin:0">Repo context (index)</label></div>
   <div class="row"><input id="enableSemanticRetrieval" type="checkbox" /><label for="enableSemanticRetrieval" style="margin:0">Semantic (embeddings)</label></div>
-  <label>Debounce (ms)</label><input id="debounceMs" type="number" />
-  <label>Max tokens</label><input id="maxTokens" type="number" />
-  <label>Max neighbor files</label><input id="maxNeighborFiles" type="number" />
-  <label>Max prefix chars</label><input id="maxPrefixChars" type="number" />
-  <label>Max suffix chars</label><input id="maxSuffixChars" type="number" />
-  <label>Retrieval timeout (ms)</label><input id="retrievalTimeoutMs" type="number" />
-
-  <h3>Indexing</h3>
-  <label>Max index files <span class="hint">(lexical / semantic off)</span></label><input id="maxIndexFiles" type="number" />
-  <label>Max semantic files <span class="hint">(semantic on)</span></label><input id="maxSemanticFiles" type="number" />
-  <label>Embed concurrency</label><input id="embedConcurrency" type="number" />
 
   <button id="saveAll">Save Settings</button>
+  <div class="hint" style="margin-top:6px;">Advanced options (FIM template, API mode, timeouts, index caps) live in <b>⚙ Settings</b>.</div>
 
   <h3>Index status</h3>
   <div id="progwrap" style="display:none; margin-bottom:8px;">
@@ -213,10 +190,10 @@ export class PanelProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
-  const TEXT = ["baseUrl","model","embedModel","customFimTemplate","customStop"];
-  const NUM = ["temperature","requestTimeoutMs","retrievalTimeoutMs","maxPrefixChars","maxSuffixChars","debounceMs","maxTokens","maxNeighborFiles","maxIndexFiles","maxSemanticFiles","embedConcurrency"];
+  const TEXT = ["baseUrl","model","embedModel"];
+  const NUM = [];
   const BOOL = ["enabled","multiline","enableRecentEdits","enableRepoContext","enableSemanticRetrieval"];
-  const SEL = ["apiMode","fimTemplate"];
+  const SEL = [];
 
   function bind() {
     TEXT.forEach(k => $(k).addEventListener("change", e => save(k, e.target.value)));
@@ -233,6 +210,7 @@ export class PanelProvider implements vscode.WebviewViewProvider {
     });
     $("rebuild").addEventListener("click", () => vscode.postMessage({ type: "rebuild" }));
     $("test").addEventListener("click", () => vscode.postMessage({ type: "test" }));
+    $("openSettings").addEventListener("click", () => vscode.postMessage({ type: "openSettings" }));
     $("saveAll").addEventListener("click", () => {
       const values = {};
       TEXT.forEach(k => values[k] = $(k).value);

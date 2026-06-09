@@ -55,6 +55,7 @@ export async function activate(context: vscode.ExtensionContext) {
     status,
     onRebuild: () => indexer.rebuild().catch((e) => log.appendLine(`rebuild failed: ${e?.message ?? e}`)),
     onTest: () => runTest(),
+    onOpenSettings: () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:lawndlwd.shire-autocompletion"),
   });
   const panelReg = vscode.window.registerWebviewViewProvider(PanelProvider.viewId, panel);
 
