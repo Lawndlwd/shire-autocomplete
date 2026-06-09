@@ -2,7 +2,7 @@
   "name": "shire-autocompletion",
   "displayName": "Shire Autocompletion",
   "description": "Fast inline FIM code autocomplete powered by your own OpenAI-compatible endpoint (Qwen2.5-Coder, Codestral, DeepSeek-Coder...). Recent-edit refactor assist + cross-file repo context.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "lawndlwd",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -101,6 +101,38 @@
           "default": "Qwen2.5-Coder-7B",
           "description": "Completion model name as registered on your endpoint. Use a FIM-capable code model (Qwen2.5-Coder, Codestral, DeepSeek-Coder, StarCoder2)."
         },
+        "shire.apiMode": {
+          "type": "string",
+          "enum": ["completions", "chat", "auto"],
+          "default": "completions",
+          "enumDescriptions": [
+            "Use /v1/completions with FIM tokens (best quality; needs a FIM model + completions endpoint)",
+            "Use /v1/chat/completions (works on chat-only endpoints; lower quality)",
+            "Try completions, fall back to chat if the endpoint rejects it"
+          ],
+          "description": "Which API to call. Use 'chat' or 'auto' if your endpoint only exposes /v1/chat/completions."
+        },
+        "shire.fimTemplate": {
+          "type": "string",
+          "enum": ["qwen", "starcoder", "deepseek", "codestral", "custom"],
+          "default": "qwen",
+          "description": "Fill-in-the-middle token format. MUST match your model family or completions are garbage. qwen = Qwen2.5/3-Coder; starcoder = StarCoder/2; deepseek = DeepSeek-Coder; codestral = Mistral Codestral."
+        },
+        "shire.customFimTemplate": {
+          "type": "string",
+          "default": "{prefix}{suffix}",
+          "description": "Used when fimTemplate = custom. Must contain {prefix} and {suffix} placeholders."
+        },
+        "shire.customStop": {
+          "type": "string",
+          "default": "",
+          "description": "Used when fimTemplate = custom. Comma-separated stop strings."
+        },
+        "shire.requestTimeoutMs": {
+          "type": "number",
+          "default": 8000,
+          "description": "Abort a completion request after this many ms if the endpoint hangs or is unreachable."
+        },
         "shire.debounceMs": {
           "type": "number",
           "default": 150,
@@ -130,6 +162,12 @@
           "type": "boolean",
           "default": true,
           "description": "Allow multi-line completions. Turn off for single-line-only."
+        },
+        "shire.disabledLanguages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["scminput", "git-commit", "plaintext"],
+          "description": "Language ids where autocomplete is disabled (e.g. add 'markdown', 'json'). Use the language id shown in the bottom-right of the editor."
         },
         "shire.enableRecentEdits": {
           "type": "boolean",

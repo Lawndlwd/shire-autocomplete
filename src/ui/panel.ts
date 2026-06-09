@@ -69,6 +69,15 @@ export class PanelProvider implements vscode.WebviewViewProvider {
         model: cfg.model,
         embedModel: cfg.embedModel,
         hasApiKey: hasSecret,
+        apiMode: cfg.apiMode,
+        fimTemplate: cfg.fimTemplate,
+        customFimTemplate: cfg.customFimTemplate,
+        customStop: cfg.customStop,
+        temperature: cfg.temperature,
+        requestTimeoutMs: cfg.requestTimeoutMs,
+        retrievalTimeoutMs: cfg.retrievalTimeoutMs,
+        maxPrefixChars: cfg.maxPrefixChars,
+        maxSuffixChars: cfg.maxSuffixChars,
         debounceMs: cfg.debounceMs,
         maxTokens: cfg.maxTokens,
         maxNeighborFiles: cfg.maxNeighborFiles,
@@ -110,10 +119,11 @@ export class PanelProvider implements vscode.WebviewViewProvider {
   body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 10px 12px; }
   h3 { margin: 16px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
   label { display:block; margin: 8px 0 3px; font-size: 12px; }
-  input[type=text], input[type=password], input[type=number] {
+  input[type=text], input[type=password], input[type=number], select {
     width: 100%; box-sizing: border-box; background: var(--vscode-input-background);
     color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent);
     padding: 5px 7px; border-radius: 3px; }
+  select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); }
   .row { display:flex; align-items:center; gap:8px; margin:6px 0; }
   .row input[type=checkbox] { margin:0; }
   button { margin-top: 10px; width: 100%; padding: 6px; cursor: pointer;
@@ -142,6 +152,26 @@ export class PanelProvider implements vscode.WebviewViewProvider {
   <label>Embedding Model</label>
   <input id="embedModel" type="text" />
 
+  <h3>Completion API</h3>
+  <label>API Mode</label>
+  <select id="apiMode">
+    <option value="completions">completions (FIM)</option>
+    <option value="chat">chat</option>
+    <option value="auto">auto (try completions → chat)</option>
+  </select>
+  <label>FIM Template <span class="hint">(must match model family)</span></label>
+  <select id="fimTemplate">
+    <option value="qwen">qwen</option>
+    <option value="starcoder">starcoder</option>
+    <option value="deepseek">deepseek</option>
+    <option value="codestral">codestral</option>
+    <option value="custom">custom</option>
+  </select>
+  <label>Custom FIM template <span class="hint">{prefix}{suffix}</span></label><input id="customFimTemplate" type="text" />
+  <label>Custom stop <span class="hint">(comma-separated)</span></label><input id="customStop" type="text" />
+  <label>Temperature</label><input id="temperature" type="number" step="0.05" />
+  <label>Request timeout (ms)</label><input id="requestTimeoutMs" type="number" />
+
   <h3>Behaviour</h3>
   <div class="row"><input id="enabled" type="checkbox" /><label for="enabled" style="margin:0">Autocomplete enabled</label></div>
   <div class="row"><input id="multiline" type="checkbox" /><label for="multiline" style="margin:0">Multi-line</label></div>
@@ -151,6 +181,9 @@ export class PanelProvider implements vscode.WebviewViewProvider {
   <label>Debounce (ms)</label><input id="debounceMs" type="number" />
   <label>Max tokens</label><input id="maxTokens" type="number" />
   <label>Max neighbor files</label><input id="maxNeighborFiles" type="number" />
+  <label>Max prefix chars</label><input id="maxPrefixChars" type="number" />
+  <label>Max suffix chars</label><input id="maxSuffixChars" type="number" />
+  <label>Retrieval timeout (ms)</label><input id="retrievalTimeoutMs" type="number" />
 
   <h3>Indexing</h3>
   <label>Max index files <span class="hint">(lexical / semantic off)</span></label><input id="maxIndexFiles" type="number" />
@@ -180,12 +213,14 @@ export class PanelProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
-  const TEXT = ["baseUrl","model","embedModel"];
-  const NUM = ["debounceMs","maxTokens","maxNeighborFiles","maxIndexFiles","maxSemanticFiles","embedConcurrency"];
+  const TEXT = ["baseUrl","model","embedModel","customFimTemplate","customStop"];
+  const NUM = ["temperature","requestTimeoutMs","retrievalTimeoutMs","maxPrefixChars","maxSuffixChars","debounceMs","maxTokens","maxNeighborFiles","maxIndexFiles","maxSemanticFiles","embedConcurrency"];
   const BOOL = ["enabled","multiline","enableRecentEdits","enableRepoContext","enableSemanticRetrieval"];
+  const SEL = ["apiMode","fimTemplate"];
 
   function bind() {
     TEXT.forEach(k => $(k).addEventListener("change", e => save(k, e.target.value)));
+    SEL.forEach(k => $(k).addEventListener("change", e => save(k, e.target.value)));
     NUM.forEach(k => $(k).addEventListener("change", e => {
       const n = Number(e.target.value);
       if (!Number.isFinite(n)) { return; } // ignore empty/invalid — keep prior value
@@ -201,6 +236,7 @@ export class PanelProvider implements vscode.WebviewViewProvider {
     $("saveAll").addEventListener("click", () => {
       const values = {};
       TEXT.forEach(k => values[k] = $(k).value);
+      SEL.forEach(k => values[k] = $(k).value);
       NUM.forEach(k => { const n = Number($(k).value); if (Number.isFinite(n)) values[k] = n; });
       BOOL.forEach(k => values[k] = $(k).checked);
       vscode.postMessage({ type: "saveAll", values });
@@ -210,6 +246,7 @@ export class PanelProvider implements vscode.WebviewViewProvider {
 
   function applyConfig(c) {
     TEXT.forEach(k => $(k).value = c[k] ?? "");
+    SEL.forEach(k => { if (c[k] != null) $(k).value = c[k]; });
     NUM.forEach(k => $(k).value = c[k] ?? 0);
     BOOL.forEach(k => $(k).checked = !!c[k]);
     $("keyState").textContent = c.hasApiKey ? "✓ set (encrypted)" : "not set";

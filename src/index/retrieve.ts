@@ -1,7 +1,11 @@
 import type { Config } from "../config";
-import type { NeighborFile } from "../fim";
 import { embed } from "./embeddings";
 import type { Store } from "./store";
+
+export interface NeighborFile {
+  path: string;
+  content: string;
+}
 
 const STOP_WORDS = new Set([
   "const", "let", "var", "function", "return", "import", "export", "from", "this",

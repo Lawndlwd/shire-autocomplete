@@ -2,17 +2,17 @@ import * as vscode from "vscode";
 import { getConfig } from "./config";
 import { getWindow } from "./context/window";
 import { RecentEdits } from "./context/recentEdits";
-import { buildFimPrompt, type NeighborFile } from "./fim";
+import { getFimSpec, buildPrompt } from "./fim";
 import { complete } from "./client";
 import { LruCache, hash } from "./cache";
 import type { Indexer } from "./index/indexer";
-import { retrieve } from "./index/retrieve";
+import { retrieve, type NeighborFile } from "./index/retrieve";
 import type { Status } from "./status";
 
-// Comment token per language so the recent-edits preamble reads naturally.
+// Comment token per language so injected context reads as natural comments.
 function commentToken(languageId: string): string {
-  const set = new Set(["python", "ruby", "shellscript", "yaml", "toml", "perl", "r"]);
-  return set.has(languageId) ? "#" : "//";
+  const hashSet = new Set(["python", "ruby", "shellscript", "yaml", "toml", "perl", "r", "elixir"]);
+  return hashSet.has(languageId) ? "#" : "//";
 }
 
 export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
@@ -35,49 +35,31 @@ export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
     token: vscode.CancellationToken
   ): Promise<vscode.InlineCompletionItem[] | undefined> {
     const cfg = getConfig();
-    if (!cfg.enabled) {
-      return;
-    }
+    if (!cfg.enabled) return;
+    if (cfg.disabledLanguages.includes(document.languageId)) return;
 
-    // Tier-1 context: prefix/suffix around the cursor.
-    const { prefix, suffix } = getWindow(
-      document,
-      position,
-      cfg.maxPrefixChars,
-      cfg.maxSuffixChars
-    );
-    if (prefix.trim().length === 0) {
-      return;
-    }
+    const { prefix, suffix } = getWindow(document, position, cfg.maxPrefixChars, cfg.maxSuffixChars);
+    if (prefix.trim().length === 0) return;
 
-    // Recent-edit context: feed the model the before→after diffs I just made,
-    // so it can propagate an analogous change to where I'm typing now.
-    const recentEdits = cfg.enableRecentEdits
-      ? this.recentEdits.format(commentToken(document.languageId))
-      : "";
+    const commentTok = commentToken(document.languageId);
+    const recentEdits = cfg.enableRecentEdits ? this.recentEdits.format(commentTok) : "";
+    const spec = getFimSpec(cfg.fimTemplate, cfg.customFimTemplate, cfg.customStop);
 
-    // Cache key = local context + everything else that changes the result:
-    // prompt-affecting config and the index version (so a finished/updated
-    // index never serves a completion computed against the old one). Neighbors
-    // derive from index version + context, so we needn't compute them first.
+    // Cache key includes everything that changes the result without changing the
+    // local context: prompt-affecting config + the index version.
     const indexVersion = this.indexer?.version ?? 0;
-    const sig = `${cfg.model}|${cfg.temperature}|${cfg.maxTokens}|${cfg.multiline}|v${indexVersion}`;
-    const key = hash(`${prefix}${suffix}${recentEdits}${sig}`);
+    const sig = `${cfg.model}|${cfg.apiMode}|${cfg.fimTemplate}|${cfg.temperature}|${cfg.maxTokens}|${cfg.multiline}|v${indexVersion}`;
+    const key = hash(`${prefix}${suffix}${recentEdits}${sig}`);
     const cached = this.cache.get(key);
     if (cached !== undefined) {
       return cached ? [this.item(cached, position)] : undefined;
     }
 
-    // Debounce: wait out the idle window; bail if a newer keystroke cancels us.
     const idle = await this.debounce(cfg.debounceMs, token);
-    if (!idle) {
-      return;
-    }
+    if (!idle) return;
 
-    // Tier-2 repo retrieval, time-boxed so it can never delay the completion.
-    // Lexical is sub-millisecond; semantic (if on) issues a query-embedding
-    // request that we abort the instant the time-box fires, so a slow embedding
-    // endpoint can't pile up orphaned requests under fast typing.
+    // Tier-2 repo retrieval, time-boxed; the embedding request is aborted the
+    // instant the time-box fires so slow embeds can't pile up.
     let neighbors: NeighborFile[] = [];
     const currentFile = vscode.workspace.asRelativePath(document.uri, false);
     if (cfg.enableRepoContext && this.indexer?.store.ready) {
@@ -98,33 +80,32 @@ export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
       );
     }
 
-    const prompt = buildFimPrompt(prefix, suffix, {
-      recentEdits,
-      neighbors,
-      currentPath: currentFile,
-      repoName: vscode.workspace.name ?? "workspace",
-    });
+    const neighborBlock = neighbors.length
+      ? neighbors.map((n) => this.commentSnippet(commentTok, n)).join("\n") + "\n"
+      : "";
+    const preamble = recentEdits + neighborBlock;
+    const fimPrompt = buildPrompt(spec, prefix, suffix, preamble);
 
-    // Cancel any prior in-flight request, start a fresh one.
     this.inFlight?.abort();
     const ctl = new AbortController();
     this.inFlight = ctl;
     token.onCancellationRequested(() => ctl.abort());
 
-    const result = await complete(
+    const result = await complete({
       cfg,
-      prompt,
-      ctl.signal,
-      (m) => this.log.appendLine(m),
-      (err) => this.status?.update({ lastError: err })
-    );
-    if (!result || token.isCancellationRequested) {
-      return; // don't cache results for a context the user already moved past
-    }
-    // A successful completion clears any prior error shown in the panel.
+      fimPrompt,
+      stop: spec.stop,
+      prefix,
+      suffix,
+      preamble,
+      signal: ctl.signal,
+      log: (m) => this.log.appendLine(m),
+      onError: (err) => this.status?.update({ lastError: err }),
+    });
+    if (!result || token.isCancellationRequested) return;
     this.status?.update({ lastError: "" });
 
-    const text = this.postProcess(result.text, suffix, cfg.multiline);
+    const text = this.postProcess(result.text, suffix, cfg.multiline, spec.tokens);
     this.cache.set(key, text);
 
     this.log.appendLine(
@@ -137,9 +118,7 @@ export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
       lastNeighbors: neighbors.length,
     });
 
-    if (!text) {
-      return;
-    }
+    if (!text) return;
     return [this.item(text, position)];
   }
 
@@ -147,27 +126,34 @@ export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
     return new vscode.InlineCompletionItem(text, new vscode.Range(position, position));
   }
 
-  // Clean the raw model output.
-  private postProcess(raw: string, suffix: string, multiline: boolean): string {
-    // Special tokens mark structural boundaries — anything from the first one on
-    // is never wanted content. Truncate (a server ignoring `stop` would else
-    // leak "<|file_sep|>...the next file..."). Case-insensitive for safety.
+  // A neighbor snippet rendered as a safe comment block (every line commented so
+  // the model never tries to "continue" it as live code).
+  private commentSnippet(tok: string, n: NeighborFile): string {
+    const lines = n.content.split("\n").map((l) => `${tok} ${l}`).join("\n");
+    return `${tok} --- ${n.path} ---\n${lines}`;
+  }
+
+  private postProcess(raw: string, suffix: string, multiline: boolean, tokens: string[]): string {
     let text = raw;
-    const tok = text.search(/<\|[a-z0-9_]+\|>/i);
-    if (tok !== -1) {
-      text = text.slice(0, tok);
+
+    // Chat mode sometimes wraps output in a code fence — strip it.
+    text = text.replace(/^\s*```[a-zA-Z0-9]*\n?/, "").replace(/```\s*$/, "");
+
+    // Truncate at the earliest special token (a server ignoring `stop` may leak
+    // sentinels or the next "file"). Covers all model families' tokens.
+    let cut = -1;
+    for (const t of tokens) {
+      const i = text.indexOf(t);
+      if (i !== -1 && (cut === -1 || i < cut)) cut = i;
     }
+    if (cut !== -1) text = text.slice(0, cut);
 
     if (!multiline) {
       const nl = text.indexOf("\n");
-      if (nl !== -1) {
-        text = text.slice(0, nl);
-      }
+      if (nl !== -1) text = text.slice(0, nl);
     }
 
-    // The model sometimes re-types the code that already follows the cursor.
-    // Only strip it when it appears as a TRAILING repeat (everything after the
-    // match is whitespace) — never cut a legitimate mid-completion occurrence.
+    // Strip a trailing repeat of the code that already follows the cursor.
     const firstSuffixLine = suffix.split("\n")[0]?.trim();
     if (firstSuffixLine && firstSuffixLine.length > 3) {
       const idx = text.lastIndexOf(firstSuffixLine);
@@ -179,8 +165,6 @@ export class QwenInlineProvider implements vscode.InlineCompletionItemProvider {
     return text.replace(/\s+$/, "");
   }
 
-  // Race a promise against a timeout; on timeout run onTimeout (to abort the
-  // underlying work) and return the fallback.
   private timeBox<T>(p: Promise<T>, ms: number, fallback: T, onTimeout?: () => void): Promise<T> {
     return Promise.race([
       p.catch(() => fallback),

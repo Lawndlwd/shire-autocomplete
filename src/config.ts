@@ -5,12 +5,18 @@ export interface Config {
   baseUrl: string;
   apiKey: string;
   model: string;
+  apiMode: "completions" | "chat" | "auto";
+  fimTemplate: import("./fim").FimPreset;
+  customFimTemplate: string;
+  customStop: string;
+  requestTimeoutMs: number;
   debounceMs: number;
   maxPrefixChars: number;
   maxSuffixChars: number;
   maxTokens: number;
   temperature: number;
   multiline: boolean;
+  disabledLanguages: string[];
   enableRecentEdits: boolean;
   enableRepoContext: boolean;
   enableSemanticRetrieval: boolean;
@@ -50,12 +56,18 @@ export function getConfig(): Config {
     // Prefer the secret; fall back to a legacy plaintext setting if present.
     apiKey: clean(cachedApiKey || c.get<string>("apiKey", "")),
     model: clean(c.get<string>("model", "Qwen2.5-Coder-7B")),
+    apiMode: c.get<Config["apiMode"]>("apiMode", "completions"),
+    fimTemplate: c.get<Config["fimTemplate"]>("fimTemplate", "qwen"),
+    customFimTemplate: c.get<string>("customFimTemplate", "{prefix}{suffix}"),
+    customStop: c.get<string>("customStop", ""),
+    requestTimeoutMs: c.get<number>("requestTimeoutMs", 8000),
     debounceMs: c.get<number>("debounceMs", 150),
     maxPrefixChars: c.get<number>("maxPrefixChars", 3000),
     maxSuffixChars: c.get<number>("maxSuffixChars", 1500),
     maxTokens: c.get<number>("maxTokens", 256),
     temperature: c.get<number>("temperature", 0.1),
     multiline: c.get<boolean>("multiline", true),
+    disabledLanguages: c.get<string[]>("disabledLanguages", ["scminput", "git-commit", "plaintext"]),
     enableRecentEdits: c.get<boolean>("enableRecentEdits", true),
     enableRepoContext: c.get<boolean>("enableRepoContext", true),
     enableSemanticRetrieval: c.get<boolean>("enableSemanticRetrieval", false),

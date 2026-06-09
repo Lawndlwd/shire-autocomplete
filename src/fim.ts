@@ -1,53 +1,107 @@
-// Qwen2.5-Coder Fill-In-the-Middle prompt assembly.
-//
-// File-level format (the model was trained on exactly this):
-//   <|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>
-//
-// Repo-level format (cross-file context via neighbor snippets):
-//   <|repo_name|>{repo}<|file_sep|>{path}\n{content>...<|file_sep|>{currentPath}\n
-//   <|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>
-//
-// Getting these tokens exactly right is the single biggest quality lever. A
-// chat template or a wrong token = garbage completions.
+// Fill-In-the-Middle prompt assembly for multiple model families. Each family
+// uses its own special tokens and ordering — using the wrong ones yields
+// garbage, so the template is selectable (or fully custom).
 
-export const FIM_PREFIX = "<|fim_prefix|>";
-export const FIM_SUFFIX = "<|fim_suffix|>";
-export const FIM_MIDDLE = "<|fim_middle|>";
-export const REPO_NAME = "<|repo_name|>";
-export const FILE_SEP = "<|file_sep|>";
+export type FimPreset = "qwen" | "starcoder" | "deepseek" | "codestral" | "custom";
 
-// Anything in this list ends generation. file_sep / endoftext stop the model
-// from inventing whole new files; fim_pad is padding it should never emit.
-export const STOP_TOKENS = ["<|fim_pad|>", "<|endoftext|>", "<|file_sep|>", "<|repo_name|>"];
-
-export interface NeighborFile {
-  path: string;
-  content: string;
+export interface FimSpec {
+  name: string;
+  pre: string; // prefix sentinel
+  suf: string; // suffix sentinel
+  mid: string; // middle sentinel ("" if the family has none)
+  spm: boolean; // true => suffix,prefix ordering (Codestral); false => prefix,suffix,middle
+  stop: string[]; // server-side stop strings
+  tokens: string[]; // every sentinel — used to truncate leaked output client-side
+  custom?: string; // custom template containing {prefix} and {suffix}
 }
 
-export function buildFimPrompt(
+const PRESETS: Record<Exclude<FimPreset, "custom">, FimSpec> = {
+  // Qwen2.5-Coder / Qwen3-Coder
+  qwen: {
+    name: "qwen",
+    pre: "<|fim_prefix|>",
+    suf: "<|fim_suffix|>",
+    mid: "<|fim_middle|>",
+    spm: false,
+    stop: ["<|fim_pad|>", "<|endoftext|>", "<|file_sep|>", "<|repo_name|>"],
+    tokens: [
+      "<|fim_prefix|>", "<|fim_suffix|>", "<|fim_middle|>", "<|fim_pad|>",
+      "<|endoftext|>", "<|file_sep|>", "<|repo_name|>",
+    ],
+  },
+  // StarCoder / StarCoder2
+  starcoder: {
+    name: "starcoder",
+    pre: "<fim_prefix>",
+    suf: "<fim_suffix>",
+    mid: "<fim_middle>",
+    spm: false,
+    stop: ["<|endoftext|>", "<file_sep>"],
+    tokens: ["<fim_prefix>", "<fim_suffix>", "<fim_middle>", "<|endoftext|>", "<file_sep>"],
+  },
+  // DeepSeek-Coder (note the full-width pipe ｜ and underscore ▁)
+  deepseek: {
+    name: "deepseek",
+    pre: "<｜fim▁begin｜>",
+    suf: "<｜fim▁hole｜>",
+    mid: "<｜fim▁end｜>",
+    spm: false,
+    stop: ["<｜end▁of▁sentence｜>"],
+    tokens: ["<｜fim▁begin｜>", "<｜fim▁hole｜>", "<｜fim▁end｜>", "<｜end▁of▁sentence｜>"],
+  },
+  // Codestral (Mistral): suffix THEN prefix, no middle sentinel
+  codestral: {
+    name: "codestral",
+    pre: "[PREFIX]",
+    suf: "[SUFFIX]",
+    mid: "",
+    spm: true,
+    stop: ["</s>"],
+    tokens: ["[PREFIX]", "[SUFFIX]", "[MIDDLE]", "</s>"],
+  },
+};
+
+// Resolve a spec from a preset name, or build a custom one. customTemplate must
+// contain {prefix} and {suffix}; customStop is a comma-separated stop list.
+export function getFimSpec(
+  preset: FimPreset,
+  customTemplate?: string,
+  customStop?: string
+): FimSpec {
+  if (preset === "custom") {
+    const stop = (customStop ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return {
+      name: "custom",
+      pre: "",
+      suf: "",
+      mid: "",
+      spm: false,
+      stop,
+      tokens: stop,
+      custom: customTemplate || "{prefix}{suffix}",
+    };
+  }
+  return PRESETS[preset] ?? PRESETS.qwen;
+}
+
+// Assemble the final prompt. `preamble` (recent edits + neighbor snippets, as
+// comments) is folded into the prefix so the model treats it as context.
+export function buildPrompt(
+  spec: FimSpec,
   prefix: string,
   suffix: string,
-  opts?: {
-    repoName?: string;
-    currentPath?: string;
-    neighbors?: NeighborFile[];
-    recentEdits?: string;
-  }
+  preamble = ""
 ): string {
-  // Recent-edit diffs go right before the cursor's code as a comment preamble,
-  // so the model treats them as fresh context for what to type next.
-  const pre = (opts?.recentEdits ?? "") + prefix;
-
-  const neighbors = opts?.neighbors ?? [];
-  if (neighbors.length === 0) {
-    return `${FIM_PREFIX}${pre}${FIM_SUFFIX}${suffix}${FIM_MIDDLE}`;
+  const pre = preamble + prefix;
+  if (spec.custom) {
+    return spec.custom.replace(/\{prefix\}/g, pre).replace(/\{suffix\}/g, suffix);
   }
-
-  let head = `${REPO_NAME}${opts?.repoName ?? "workspace"}`;
-  for (const n of neighbors) {
-    head += `${FILE_SEP}${n.path}\n${n.content}`;
+  if (spec.spm) {
+    // Codestral: [SUFFIX]{suffix}[PREFIX]{prefix}
+    return `${spec.suf}${suffix}${spec.pre}${pre}`;
   }
-  head += `${FILE_SEP}${opts?.currentPath ?? "current"}\n`;
-  return `${head}${FIM_PREFIX}${pre}${FIM_SUFFIX}${suffix}${FIM_MIDDLE}`;
+  return `${spec.pre}${pre}${spec.suf}${suffix}${spec.mid}`;
 }
